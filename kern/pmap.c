@@ -102,8 +102,11 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
+	result = nextfree;
+	nextfree = ROUNDUP((char*)result + n, PGSIZE);
+	cprintf("boot_alloc memory at %x, next memory allocate at %x\n", result, nextfree);
 
-	return NULL;
+	return result;
 }
 
 // Set up a two-level page table:
@@ -148,7 +151,8 @@ mem_init(void)
 	// array.  'npages' is the number of physical pages in memory.  Use memset
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
-
+	pages = (struct PageInfo*)boot_alloc(sizeof(struct PageInfo) * npages);	//分配足够大的空间(PGSIZE的倍数)保存pages数组
+	memset(pages, 0, sizeof(struct PageInfo) * npages);
 
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
@@ -251,11 +255,35 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
+	// 这里的示例代码将所有物理页面标记为免费。
+	//
+	//	1） 将物理页0标记为正在使用。
+	//	通过这种方式，我们保留了实模式的IDT和BIOS结构，以防我们需要它。
+	//	2）剩余的基本内存[PGSIZE，npages_basemem * PGSIZE）是免费的。
+	//	3） 然后是IO孔（IOPHYSEM，EXTPHYSEM），这是绝对不能分配的。
+	//	4） 然后扩展内存[EXTPHYSEM，…]。
+	//	有些正在使用，有些是免费的。内核在物理内存中的位置？哪些页面已用于页面表和其他数据结构？
+	//	更改代码以反映这一点。
+	//	注意：不要实际触摸空闲页面对应的物理内存！
 	size_t i;
+	size_t io_hole_start_page = (size_t)IOPHYSMEM / PGSIZE;
+	size_t kernel_end_page = PADDR(boot_alloc(0)) / PGSIZE;
 	for (i = 0; i < npages; i++) {
-		pages[i].pp_ref = 0;
-		pages[i].pp_link = page_free_list;
-		page_free_list = &pages[i];
+		if (i == 0) {
+			pages[i].pp_ref = 1;
+			pages[i].pp_link = NULL;
+		}
+		else if (i >= io_hole_start_page && i <= kernel_end_page) 
+		{
+			pages[i].pp_ref = 1;
+			pages[i].pp_link = NULL;
+		}
+		else {
+			pages[i].pp_ref = 0;
+			pages[i].pp_link = page_free_list;
+			page_free_list = &pages[i];
+		}
+
 	}
 }
 
@@ -271,11 +299,28 @@ page_init(void)
 // Returns NULL if out of free memory.
 //
 // Hint: use page2kva and memset
+//分配物理页面。如果（alloc_flags& alloc_ZERO），则用“\0”字节填充整个返回的物理页。不增加页面的引用计数 - 如果需要，调用者必须执行这些操作（显式或通过page_insert）。
+//确保将已分配页面的pp_link字段设置为NULL，以便page_free可以检查是否存在双自由错误。
+//如果可用内存不足，则返回NULL。
+//提示：使用page2kva和memset
 struct PageInfo *
 page_alloc(int alloc_flags)
 {
 	// Fill this function in
-	return 0;
+	struct PageInfo* temp = page_free_list;
+	if (temp == NULL) {
+		cprintf("page_alloc: out of free memory\n");
+		return NULL;
+	}
+	page_free_list = page_free_list->pp_link;
+	temp->pp_link = NULL;
+
+	if (alloc_flags & alloc_ZERO) {
+		void * addr = page2kva(temp);
+		memset(addr, '\0', PGSIZE);
+	}
+
+	return temp;
 }
 
 //
@@ -288,6 +333,13 @@ page_free(struct PageInfo *pp)
 	// Fill this function in
 	// Hint: You may want to panic if pp->pp_ref is nonzero or
 	// pp->pp_link is not NULL.
+	if (pp->pp_ref != 0 || pp->pp_link != NULL) {
+		cprintf("page_free: pp->pp_ref is nonzero or pp->pp_link is not NULL\n");
+		return;
+	}
+	pp->pp_link = page_free_list;
+	page_free_list = pp;
+	return;
 }
 
 //
