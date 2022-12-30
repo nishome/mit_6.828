@@ -315,7 +315,7 @@ page_alloc(int alloc_flags)
 	page_free_list = page_free_list->pp_link;
 	temp->pp_link = NULL;
 
-	if (alloc_flags & Alloc_ZERO) {
+	if (alloc_flags & ALLOC_ZERO) {
 		void * addr = page2kva(temp);
 		memset(addr, '\0', PGSIZE);
 	}
