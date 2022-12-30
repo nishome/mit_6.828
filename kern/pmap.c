@@ -104,7 +104,6 @@ boot_alloc(uint32_t n)
 	// LAB 2: Your code here.
 	result = nextfree;
 	nextfree = ROUNDUP((char*)result + n, PGSIZE);
-	cprintf("boot_alloc memory at %x, next memory allocate at %x\n", result, nextfree);
 
 	return result;
 }
