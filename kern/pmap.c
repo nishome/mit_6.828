@@ -1,4 +1,4 @@
-/* See COPYRIGHT for copyright information. */
+﻿/* See COPYRIGHT for copyright information. */
 
 #include <inc/x86.h>
 #include <inc/mmu.h>
@@ -149,7 +149,7 @@ mem_init(void)
 	// array.  'npages' is the number of physical pages in memory.  Use memset
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
-	pages = (struct PageInfo*)boot_alloc(sizeof(struct PageInfo) * npages);	//�����㹻��Ŀռ�(PGSIZE�ı���)����pages����
+	pages = (struct PageInfo*)boot_alloc(sizeof(struct PageInfo) * npages);	//分配足够大的空间(PGSIZE的倍数)保存pages数组
 	memset(pages, 0, sizeof(struct PageInfo) * npages);
 
 	//////////////////////////////////////////////////////////////////////
@@ -174,6 +174,7 @@ mem_init(void)
 	//      (ie. perm = PTE_U | PTE_P)
 	//    - pages itself -- kernel RW, user NONE
 	// Your code goes here:
+
 
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
@@ -253,16 +254,16 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
-	// �����ʾ�����뽫��������ҳ����Ϊ��ѡ�
+	// 这里的示例代码将所有物理页面标记为免费。
 	//
-	//	1�� ������ҳ0���Ϊ����ʹ�á�
-	//	ͨ�����ַ�ʽ�����Ǳ�����ʵģʽ��IDT��BIOS�ṹ���Է�������Ҫ����
-	//	2��ʣ��Ļ����ڴ�[PGSIZE��npages_basemem * PGSIZE������ѵġ�
-	//	3�� Ȼ����IO�ף�IOPHYSEM��EXTPHYSEM�������Ǿ��Բ��ܷ���ġ�
-	//	4�� Ȼ����չ�ڴ�[EXTPHYSEM����]��
-	//	��Щ����ʹ�ã���Щ����ѵġ��ں��������ڴ��е�λ�ã���Щҳ��������ҳ������������ݽṹ��
-	//	���Ĵ����Է�ӳ��һ�㡣
-	//	ע�⣺��Ҫʵ�ʴ�������ҳ���Ӧ�������ڴ棡
+	//	1） 将物理页0标记为正在使用。
+	//	通过这种方式，我们保留了实模式的IDT和BIOS结构，以防我们需要它。
+	//	2）剩余的基本内存[PGSIZE，npages_basemem * PGSIZE）是免费的。
+	//	3） 然后是IO孔（IOPHYSEM，EXTPHYSEM），这是绝对不能分配的。
+	//	4） 然后扩展内存[EXTPHYSEM，…]。
+	//	有些正在使用，有些是免费的。内核在物理内存中的位置？哪些页面已用于页面表和其他数据结构？
+	//	更改代码以反映这一点。
+	//	注意：不要实际触摸空闲页面对应的物理内存！
 	size_t i;
 	size_t io_hole_start_page = (size_t)IOPHYSMEM / PGSIZE;
 	size_t kernel_end_page = PADDR(boot_alloc(0)) / PGSIZE;
@@ -297,10 +298,10 @@ page_init(void)
 // Returns NULL if out of free memory.
 //
 // Hint: use page2kva and memset
-//��������ҳ�档�����alloc_flags& alloc_ZERO�������á�\0���ֽ�����������ص�����ҳ��������ҳ������ü��� - �����Ҫ�������߱���ִ����Щ��������ʽ��ͨ��page_insert����
-//ȷ�����ѷ���ҳ���pp_link�ֶ�����ΪNULL���Ա�page_free���Լ���Ƿ����˫���ɴ���
-//��������ڴ治�㣬�򷵻�NULL��
-//��ʾ��ʹ��page2kva��memset
+//分配物理页面。如果（alloc_flags& alloc_ZERO），则用“\0”字节填充整个返回的物理页。不增加页面的引用计数 - 如果需要，调用者必须执行这些操作（显式或通过page_insert）。
+//确保将已分配页面的pp_link字段设置为NULL，以便page_free可以检查是否存在双自由错误。
+//如果可用内存不足，则返回NULL。
+//提示：使用page2kva和memset
 struct PageInfo *
 page_alloc(int alloc_flags)
 {
@@ -351,6 +352,14 @@ page_decref(struct PageInfo* pp)
 		page_free(pp);
 }
 
+static pde_t*
+find_pde(pde_t* pgdir, const void* va) {
+	uint32_t addr = (uint32_t)va;
+	uint32_t PDX_T = PDX(addr);
+	uint32_t PDE_T = pgdir + 4 * PDX_T;
+	return (pde_t * )PDE_T;
+}
+
 // Given 'pgdir', a pointer to a page directory, pgdir_walk returns
 // a pointer to the page table entry (PTE) for linear address 'va'.
 // This requires walking the two-level page table structure.
@@ -372,12 +381,38 @@ page_decref(struct PageInfo* pp)
 //
 // Hint 3: look at inc/mmu.h for useful macros that manipulate page
 // table and page directory entries.
-//
+//给定“pgdir”（指向页目录的指针），pgdir_walk返回指向线性地址“va”的页表条目（PTE）的指针。
+//这需要遍历两级页表结构。
+//相关的页表页可能还不存在。
+//如果这是真的，并且create == false，那么pgdir_walk返回NULL。
+//否则，pgdir_walk将使用page_alloc分配一个新的页表页。
+//- 如果分配失败，pgdir_walk将返回NULL。
+//- 否则，新页面的引用计数将递增，页面将被清除，pgdir_walk将返回指向新页表页的指针。
+//提示1：您可以将PageInfo * 转换为它从kern / pmap.h使用page2pa（）引用的页面的物理地址。
+//提示2：x86 MMU检查页面目录和页面表中的权限位，因此，将页面目录中的权限保留得比严格需要的更宽松是安全的。
+//提示3：查看inc / mmu.h，以获取操作页表和页目录条目的有用宏。
+
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
 	// Fill this function in
-	return NULL;
+	
+	pde_t* PDE_T = find_pde(pgdir, va);
+	if (!((*PDE_T) & PTE_P)) {
+		if (create == false) {
+			return NULL;
+		}
+		else {
+			struct PageInfo* temp = page_alloc(0);
+			if (temp == NULL) {
+				return NULL;
+			}
+			temp->pp_ref++;
+			*PDE_T = page2pa(temp) | PTE_P | PTE_U | PTE_W;
+		}
+	}
+
+	return (pte_t *)(KADDR(PTE_ADDR(*PDE_T)) + 4 * PTX(va));
 }
 
 //
@@ -391,10 +426,37 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 // mapped pages.
 //
 // Hint: the TA solution uses pgdir_walk
+// 将虚拟地址空间的[va，va+size）映射到以pgdir为根的页表中的物理[pa，pa+size）。大小是PGSIZE的倍数，并且va和pa都是页面对齐的。
+//对条目使用perm | PTE_P权限位。
+//此函数仅用于在UTOP之上设置“静态”映射。因此，它不应该 * 更改映射页面上的pp_ref字段。
+//提示：TA解决方案使用pgdir_walk
 static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
+	int n;
+	if (size % PGSIZE != 0) {
+		n = size / PGSIZE + 1;
+	}
+	else {
+		n = size / PGSIZE;
+	}
+	uintptr_t temp_va = va;
+	physaddr_t temp_pa = pa;
+	for (int i = 0; i < n; ++i) {
+		pte_t* PTE_T = pgdir_walk(pgdir, temp_va, true);
+		if (PTE_T != NULL) {
+			*PTE_T = temp_pa | perm | PTE_P;
+			temp_pa += PGSIZE;
+			temp_va += PGSIZE;
+		}
+		else {
+			cprintf("boot_map_region(): out of memory\n");
+			return;
+		}
+	}
+
+
 }
 
 //
@@ -422,10 +484,36 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 // Hint: The TA solution is implemented using pgdir_walk, page_remove,
 // and page2pa.
 //
+//将物理页面“pp”映射到虚拟地址“va”。
+//页表项的权限（低12位）应设置为“perm | PTE_P”。
+//要求 - 如果已经有一个页面映射到“va”，那么它应该是page_remove（）d。
+//- 如有必要，应根据需要分配一个页表并将其插入到“pgdir”中。
+//- 如果插入成功，pp->pp_ref应该递增。
+//- 如果页面以前位于“va”，则TLB必须无效。
+//角落大小写提示：确保考虑在同一pgdir中的同一虚拟地址重新插入同一pp时会发生什么。
+//但是，尽量不要在代码中区分这种情况，因为这经常会导致细微的错误；有一种优雅的方法可以在一个代码路径中处理所有事情。
+//返回：成功时为0 - E_NO_MEM，如果无法分配页表提示：TA解决方案使用pgdir_walk、page_remove和page2pa实现。
+
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
 	// Fill this function in
+	pte_t* PTE_T = pgdir_walk(pgdir, va, 1);
+	if (PTE_T == NULL) {
+		return -E_NO_MEM;
+	}
+	if (!((*PTE_T) & PTE_P)) {
+		*PTE_T = page2pa(pp) | perm | PTE_P;
+		pp->pp_ref++;
+		return 0;
+	}
+	else {
+		page_remove(pgdir, va);
+		*PTE_T = page2pa(pp) | perm | PTE_P;
+		pp->pp_ref++;
+	}
+
+
 	return 0;
 }
 
@@ -440,11 +528,28 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 //
 // Hint: the TA solution uses pgdir_walk and pa2page.
 //
+
+//返回映射到虚拟地址“va”的页面。
+//如果pte_store不为零，那么我们将在其中存储此页面的pte地址。这由page_remove使用，可用于验证syscall参数的页面权限，但大多数调用者不应使用。
+//如果va.处没有映射页面，则返回NULL。
+//提示：TA解决方案使用pgdir_walk和pa2page。
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
 	// Fill this function in
-	return NULL;
+	pte_t* PTE_T = pgdir_walk(pgdir, va, true);
+	if (PTE_T == NULL) {
+		return NULL;
+	}
+	if (!((*PTE_T) & PTE_P)) {
+		return NULL;
+	}
+	if (pte_store != NULL) {
+		*pte_store = PTE_T;
+	}
+	physaddr_t pa = PTE_ADDR(*PTE_T);					//va对应的物理
+	struct PageInfo* pp = pa2page(pa);
+	return pp;
 }
 
 //
@@ -462,9 +567,29 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 // Hint: The TA solution is implemented using page_lookup,
 // 	tlb_invalidate, and page_decref.
 //
+//取消映射虚拟地址“va”处的物理页。
+//如果该地址处没有物理页面，则无提示地不执行任何操作。
+//详细信息： 
+//- 物理页上的引用计数应递减。
+//- 如果refcount达到0，则应释放物理页。
+//- 与“va”对应的pg表条目应设置为0。
+//（如果存在这样的PTE） 
+//- 如果从页表中删除条目，则TLB必须无效。
+//提示：TA解决方案是使用page_lookup、tlb_validate和page_decref实现的。
+
 void
 page_remove(pde_t *pgdir, void *va)
 {
+	pte_t* pte_store;
+	struct PageInfo* page_va = page_lookup(pgdir, va, &pte_store);
+	if (page_va == NULL) {
+		return;
+	}
+	page_va->pp_ref--;
+	*pte_store = 0;
+	page_decref(page_va);
+	tlb_invalidate(pgdir, va);
+	
 	// Fill this function in
 }
 
