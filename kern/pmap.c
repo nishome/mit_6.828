@@ -179,11 +179,7 @@ mem_init(void)
 	//-UPAGES的新映像--内核R，用户R（即perm=PTE_U|PTE_P）
 	//-页面本身--内核RW，用户NONE
 	//代码如下：
-	void* temp_va = boot_alloc(0);
-	size_t temp = (size_t)PADDR(temp_va) - (size_t)PADDR(pages);
-	
-	boot_map_region(kern_pgdir, UPAGES, temp, PADDR(pages), PTE_P | PTE_W);
-	boot_map_region(kern_pgdir, UPAGES + temp , PTSIZE - temp, PADDR(temp_va), PTE_U | PTE_P);
+	boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_U | PTE_P);
 	
 
 
@@ -484,8 +480,6 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 			panic("boot_map_region(): out of memory\n");
 		}
 	}
-
-
 }
 
 //
