@@ -481,8 +481,7 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 		}
 		else {
 			
-			cprintf("boot_map_region(): out of memory\n");
-			return;
+			panic("boot_map_region(): out of memory\n");
 		}
 	}
 
