@@ -346,11 +346,9 @@ page_alloc(int alloc_flags)
 	// Fill this function in
 	struct PageInfo* temp = page_free_list;
 
-	static int i = 0;
-	++i;
 	if (temp == NULL) {
 		
-		cprintf("page_alloc: out of free memory %d\n",i);
+		cprintf("page_alloc: out of free memory\n");
 		return NULL;
 	}
 	page_free_list = page_free_list->pp_link;
