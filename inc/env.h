@@ -25,6 +25,16 @@ typedef int32_t envid_t;
 // envid_ts less than 0 signify errors.  The envid_t == 0 is special, and
 // stands for the current environment.
 
+// 环境ID“envid_t”有三部分：
+// +1+---------------21-----------------+--------10--------+
+// |0|          Uniqueifier             |   Environment    |
+// | |                                  |      Index       |
+// +------------------------------------+------------------+
+//                                       \--- ENVX(eid) --/
+//
+// 环境索引ENVX（eid）等于“envs[]”数组中的环境索引。唯一的区别是在不同时间创建的环境，但共享相同的环境索引。
+// 所有真实环境都大于0（因此符号位为零）。envid_ts小于0表示错误。envid_t == 0是特殊的，代表当前环境。
+
 #define LOG2NENV		10
 #define NENV			(1 << LOG2NENV)
 #define ENVX(envid)		((envid) & (NENV - 1))

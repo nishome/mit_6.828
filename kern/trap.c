@@ -64,7 +64,44 @@ trap_init(void)
 {
 	extern struct Segdesc gdt[];
 
+
 	// LAB 3: Your code here.
+	extern void th0();
+	extern void th1();
+	extern void th3();
+	extern void th4();
+	extern void th5();
+	extern void th6();
+	extern void th7();
+	extern void th8();
+	extern void th10();
+	extern void th11();
+	extern void th12();
+	extern void th13();
+	extern void th14();
+	extern void th16();
+	extern void th17();
+	extern void th18();
+	extern void th19();
+	extern void th_syscall();
+	SETGATE(idt[0], 0, GD_KT, th0, 0);		//格式如下：SETGATE(gate, istrap, sel, off, dpl)，定义在inc/mmu.h中
+	SETGATE(idt[1], 0, GD_KT, th1, 0);		//设置idt[1]，段选择子为内核代码段，段内偏移为th1
+	SETGATE(idt[3], 0, GD_KT, th3, 3);
+	SETGATE(idt[4], 0, GD_KT, th4, 0);
+	SETGATE(idt[5], 0, GD_KT, th5, 0);
+	SETGATE(idt[6], 0, GD_KT, th6, 0);
+	SETGATE(idt[7], 0, GD_KT, th7, 0);
+	SETGATE(idt[8], 0, GD_KT, th8, 0);
+	SETGATE(idt[10], 0, GD_KT, th10, 0);
+	SETGATE(idt[11], 0, GD_KT, th11, 0);
+	SETGATE(idt[12], 0, GD_KT, th12, 0);
+	SETGATE(idt[13], 0, GD_KT, th13, 0);
+	SETGATE(idt[14], 0, GD_KT, th14, 0);
+	SETGATE(idt[16], 0, GD_KT, th16, 0);
+	SETGATE(idt[17], 0, GD_KT, th17, 0);
+	SETGATE(idt[18], 0, GD_KT, th18, 0);
+	SETGATE(idt[19], 0, GD_KT, th19, 0);
+	SETGATE(idt[T_SYSCALL], 0, GD_KT, th_syscall, 3); // DPL设置为3的原因是，中断过程的顺利完成需要要将用户环境寄存器cs中的CPL（当前环境权限级别）<= 中断描述符的DPL
 
 	// Per-CPU setup 
 	trap_init_percpu();
@@ -144,7 +181,21 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	if (tf->tf_trapno == T_PGFLT) {
+		page_fault_handler(tf);
+		return;
+	}
 
+	if (tf->tf_trapno == T_BRKPT) {
+		monitor(tf);
+		return;
+	}
+
+	if (tf->tf_trapno == T_SYSCALL) {
+		uint32_t result = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		tf->tf_regs.reg_eax = result;
+		return;
+	}
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
 	if (tf->tf_cs == GD_KT)
@@ -200,11 +251,15 @@ page_fault_handler(struct Trapframe *tf)
 	uint32_t fault_va;
 
 	// Read processor's CR2 register to find the faulting address
+	// 读取处理器的CR2寄存器以查找错误地址
 	fault_va = rcr2();
 
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+	if (!(curenv->env_tf.tf_cs & 0x3)) {
+		panic("Kernel fault");
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.

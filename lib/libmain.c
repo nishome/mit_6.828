@@ -12,8 +12,13 @@ void
 libmain(int argc, char **argv)
 {
 	// set thisenv to point at our Env structure in envs[].
+	// 将thsienv设置为指向envs[]中我们的Env结构
 	// LAB 3: Your code here.
-	thisenv = 0;
+	envid_t thisenvid = 0;
+	thisenvid = sys_getenvid();
+	thisenv = envs + ENVX(thisenvid);
+
+
 
 	// save the name of the program so that panic() can use it
 	if (argc > 0)

@@ -305,15 +305,15 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//	（小心角落的箱子！）
 	void* begin = ROUNDDOWN(va, PGSIZE), * end = ROUNDUP(va + len, PGSIZE);
 	while (begin < end) {
-		struct PageInfo* temp = page_alloc(0); //分配一个物理页
+		struct PageInfo* temp = page_alloc(0); 
 		if (temp == NULL) {
 			panic("region_alloc failed\n");
 		}
-		int flag = page_insert(e->env_pgdir, temp, begin, PTE_U | PTE_W);   //修改e->env_pgdir，建立线性地址begin到物理页pg的映射关系
+		int flag = page_insert(e->env_pgdir, temp, begin, PTE_U | PTE_W);
 		if (flag) {
 			panic("out of free memory\n");
 		}
-		begin += PGSIZE;    //更新线性地址
+		begin += PGSIZE;
 	}
 	
 }
@@ -506,8 +506,10 @@ env_destroy(struct Env *e)
 	env_free(e);
 
 	cprintf("Destroyed the only environment - nothing more to do!\n");
-	while (1)
+	while (1) {
 		monitor(NULL);
+	}
+		
 }
 
 
