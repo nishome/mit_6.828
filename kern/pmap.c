@@ -346,9 +346,11 @@ page_alloc(int alloc_flags)
 	// Fill this function in
 	struct PageInfo* temp = page_free_list;
 
+	static int i = 0;
+	++i;
 	if (temp == NULL) {
 		
-		cprintf("page_alloc: out of free memory\n");
+		cprintf("page_alloc: out of free memory %d\n",i);
 		return NULL;
 	}
 	page_free_list = page_free_list->pp_link;
@@ -666,11 +668,31 @@ static uintptr_t user_mem_check_addr;
 // Returns 0 if the user program can access this range of addresses,
 // and -E_FAULT otherwise.
 //
+// 检查是否允许环境使用“perm|PTE_P”权限访问内存范围[va，va+len）。
+// 通常，“perm”至少包含PTE_U，但这不是必需的。
+// “va”和“len”不需要页对齐；您必须测试包含任何该范围的每一页。您将测试“len / PGSIZE”、“len / PGSIZE + 1”或“len / PGSIZE + 2”页。
+// 如果（1）地址低于ULIM，并且（2）页面表允许访问虚拟地址，则用户程序可以访问该地址。这些正是您应该在这里实现的测试。
+// 如果存在错误，请将“user_mem_check_addr”变量设置为第一个错误的虚拟地址。
+// 如果用户程序可以访问此地址范围，则返回0，否则返回 -E_FAULT。
+
 int
 user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 {
 	// LAB 3: Your code here.
-
+	uint32_t begin = (uint32_t)ROUNDDOWN(va, PGSIZE);
+	uint32_t end = (uint32_t)ROUNDUP(va + len, PGSIZE);
+	while (begin < end) {
+		pte_t* pte = pgdir_walk(env->env_pgdir, begin, 0);
+		if ((begin >= ULIM) || (pte == NULL) || (((uint32_t)*pte & perm) != perm)) {
+			if (begin < va) {
+				user_mem_check_addr = (uintptr_t)va;
+				return -E_FAULT;
+			}
+			user_mem_check_addr = (uintptr_t)begin;
+			return -E_FAULT;
+		}
+		begin += PGSIZE;
+	}
 	return 0;
 }
 
